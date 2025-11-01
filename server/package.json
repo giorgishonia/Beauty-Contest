@@ -1,0 +1,23 @@
+{
+  "name": "balance-scale-server",
+  "version": "1.0.0",
+  "description": "Socket.IO server for Balance Scale multiplayer game",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "setup": "node setup.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "@supabase/supabase-js": "^2.76.1",
+    "dotenv": "^16.3.1",
+    "cors": "^2.8.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+

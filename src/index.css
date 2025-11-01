@@ -1,0 +1,151 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Dystopian Dark Theme - Balance Scale */
+    --background: 0 0% 4%;
+    --foreground: 0 0% 95%;
+
+    --card: 0 0% 8%;
+    --card-foreground: 0 0% 95%;
+
+    --popover: 0 0% 6%;
+    --popover-foreground: 0 0% 95%;
+
+    --primary: 348 100% 50%; /* Neon Red */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 180 100% 50%; /* Electric Cyan */
+    --secondary-foreground: 0 0% 10%;
+
+    --muted: 0 0% 12%;
+    --muted-foreground: 0 0% 60%;
+
+    --accent: 280 60% 35%; /* Dark Purple */
+    --accent-foreground: 0 0% 95%;
+
+    --destructive: 0 85% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 15%;
+    --input: 0 0% 12%;
+    --ring: 348 100% 50%;
+
+    --radius: 0.25rem;
+
+    /* Game-specific colors */
+    --neon-red: 348 100% 50%;
+    --neon-cyan: 180 100% 50%;
+    --dark-purple: 280 60% 35%;
+    --elimination-red: 0 100% 35%;
+    --winner-gold: 45 100% 55%;
+    
+    /* Gradients */
+    --gradient-danger: linear-gradient(135deg, hsl(348 100% 50%), hsl(0 100% 35%));
+    --gradient-primary: linear-gradient(135deg, hsl(348 100% 50%), hsl(280 60% 35%));
+    --gradient-glow: linear-gradient(180deg, hsl(0 0% 4%), hsl(0 0% 8%));
+    
+    /* Shadows */
+    --shadow-neon-red: 0 0 20px hsl(348 100% 50% / 0.5);
+    --shadow-neon-cyan: 0 0 20px hsl(180 100% 50% / 0.5);
+    --shadow-heavy: 0 10px 30px hsl(0 0% 0% / 0.8);
+
+    --sidebar-background: 0 0% 6%;
+    --sidebar-foreground: 0 0% 90%;
+    --sidebar-primary: 348 100% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 12%;
+    --sidebar-accent-foreground: 0 0% 90%;
+    --sidebar-border: 0 0% 15%;
+    --sidebar-ring: 348 100% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-rajdhani antialiased;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-orbitron;
+  }
+}
+
+@layer utilities {
+  .text-neon-red {
+    color: hsl(var(--neon-red));
+  }
+  
+  .text-neon-cyan {
+    color: hsl(var(--neon-cyan));
+  }
+  
+  .text-winner-gold {
+    color: hsl(var(--winner-gold));
+  }
+  
+  .bg-neon-red {
+    background-color: hsl(var(--neon-red));
+  }
+  
+  .bg-neon-cyan {
+    background-color: hsl(var(--neon-cyan));
+  }
+  
+  .border-neon-red {
+    border-color: hsl(var(--neon-red));
+  }
+  
+  .border-neon-cyan {
+    border-color: hsl(var(--neon-cyan));
+  }
+  
+  .shadow-neon-red {
+    box-shadow: var(--shadow-neon-red);
+  }
+  
+  .shadow-neon-cyan {
+    box-shadow: var(--shadow-neon-cyan);
+  }
+  
+  .glitch {
+    animation: glitch 1s linear infinite;
+  }
+  
+  @keyframes glitch {
+    2%, 64% {
+      transform: translate(2px, 0) skew(0deg);
+    }
+    4%, 60% {
+      transform: translate(-2px, 0) skew(0deg);
+    }
+    62% {
+      transform: translate(0, 0) skew(5deg);
+    }
+  }
+  
+  .drip {
+    animation: drip 2s ease-in-out infinite;
+  }
+  
+  @keyframes drip {
+    0%, 100% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+    50% {
+      transform: translateY(10px);
+      opacity: 0.5;
+    }
+  }
+}
