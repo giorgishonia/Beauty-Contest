@@ -22,10 +22,19 @@ const getSocketUrl = () => {
     return import.meta.env.VITE_SOCKET_URL;
   }
   
-  // Check if we're running on ngrok
+  // Check if we're running on Vercel (production)
   const hostname = window.location.hostname;
-  const protocol = window.location.protocol;
+  const isVercel = hostname.includes('.vercel.app') || 
+                   hostname.includes('vercel.app') ||
+                   import.meta.env.VERCEL ||
+                   import.meta.env.MODE === 'production';
   
+  if (isVercel) {
+    console.log('🌐 Detected Vercel deployment, using production server');
+    return 'http://176.223.142.21:3001';
+  }
+  
+  // Check if we're running on ngrok
   if (hostname.includes('.ngrok-free.app') || hostname.includes('.ngrok.io')) {
     // If frontend is on ngrok, assume socket server is also on ngrok
     // This assumes you're running socket server on same ngrok tunnel or have separate tunnel

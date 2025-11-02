@@ -19,7 +19,16 @@ function isUUID(userId) {
 /**
  * Create a new room
  */
+// Maximum number of concurrent rooms (memory limit)
+const MAX_ROOMS = 50;
+
 export function createRoom(lobbyId, lobbyData) {
+  // Enforce room limit
+  if (rooms.size >= MAX_ROOMS) {
+    console.warn(`⚠️ Room limit reached (${MAX_ROOMS}), cleaning up oldest inactive rooms`);
+    cleanupOldestRooms();
+  }
+
   const room = {
     lobbyId,
     gameId: null,
@@ -31,14 +40,44 @@ export function createRoom(lobbyId, lobbyData) {
     roundTimer: lobbyData.roundTimer || 60,
     timerInterval: null,
     timeRemaining: lobbyData.roundTimer || 60,
-    roundHistory: [],
+    // Removed roundHistory to save memory
     roundStartTime: null,
-    currentRoundId: null
+    currentRoundId: null,
+    createdAt: Date.now(),
+    lastActivity: Date.now()
   };
 
   rooms.set(lobbyId, room);
-  console.log(`✅ Created room: ${lobbyId}`);
+  console.log(`✅ Created room: ${lobbyId} (Total rooms: ${rooms.size})`);
   return room;
+}
+
+/**
+ * Cleanup oldest inactive rooms when limit is reached
+ */
+function cleanupOldestRooms() {
+  const now = Date.now();
+  const inactiveThreshold = 10 * 60 * 1000; // 10 minutes
+  
+  const sortedRooms = Array.from(rooms.entries())
+    .map(([id, room]) => ({ id, room, lastActivity: room.lastActivity || room.createdAt }))
+    .sort((a, b) => a.lastActivity - b.lastActivity);
+
+  // Remove oldest inactive rooms
+  for (const { id, lastActivity } of sortedRooms) {
+    if (rooms.size <= MAX_ROOMS * 0.8) break; // Keep at least 80% capacity
+    
+    if (now - lastActivity > inactiveThreshold) {
+      const room = rooms.get(id);
+      if (room && room.phase === 'waiting') {
+        if (room.timerInterval) {
+          clearInterval(room.timerInterval);
+        }
+        rooms.delete(id);
+        console.log(`🧹 Cleaned up inactive room: ${id}`);
+      }
+    }
+  }
 }
 
 /**
@@ -69,6 +108,9 @@ export function addPlayerToRoom(lobbyId, playerData) {
     console.error(`❌ Room ${lobbyId} not found when adding player`);
     return null;
   }
+
+  // Update last activity
+  room.lastActivity = Date.now();
 
   // Check if player already exists
   const existingPlayer = room.players.find(p => p.userId === playerData.userId);
@@ -246,6 +288,9 @@ export async function startRound(lobbyId, io) {
   const room = getRoom(lobbyId);
   if (!room) return;
 
+  // Update last activity
+  room.lastActivity = Date.now();
+
   // Reset player submissions
   room.players.forEach(player => {
     if (!player.isEliminated) {
@@ -278,20 +323,22 @@ export async function startRound(lobbyId, io) {
     room.currentRoundId = roundData.id;
   }
 
-  // Emit round start
+  // Emit round start with optimized player data
+  const playerData = room.players.map(p => ({
+    userId: p.userId,
+    username: p.username,
+    avatar: p.avatar,
+    score: p.score,
+    isEliminated: p.isEliminated,
+    hasSubmitted: p.hasSubmitted,
+    isConnected: p.isConnected !== false
+  }));
+  
   io.to(lobbyId).emit('round_start', {
     roundNumber: room.roundNumber,
     timeRemaining: room.timeRemaining,
     activeRules: room.activeRules,
-    players: room.players.map(p => ({
-      userId: p.userId,
-      username: p.username,
-      avatar: p.avatar,
-      score: p.score,
-      isEliminated: p.isEliminated,
-      hasSubmitted: p.hasSubmitted,
-      isConnected: p.isConnected !== false
-    }))
+    players: playerData
   });
 
   // Start timer
@@ -332,6 +379,9 @@ export async function submitChoice(lobbyId, userId, choice, io) {
     return { success: false, error: 'Room not found' };
   }
 
+  // Update last activity
+  room.lastActivity = Date.now();
+
   if (room.phase !== 'submission') {
     return { success: false, error: 'Not in submission phase' };
   }
@@ -367,18 +417,19 @@ export async function submitChoice(lobbyId, userId, choice, io) {
   player.currentChoice = choice;
   player.hasSubmitted = true;
 
-  // Save to database (only for authenticated users)
+  // Save to database (only for authenticated users) - use fire and forget to reduce latency
   if (room.currentRoundId && isUUID(userId)) {
-    await supabase
+    supabase
       .from('player_choices')
       .insert({
         round_id: room.currentRoundId,
         user_id: userId,
         choice: choice
-      });
+      })
+      .catch(err => console.error('Error saving choice to DB:', err));
   }
 
-  // Notify all players
+  // Notify all players with minimal data
   io.to(lobbyId).emit('player_submitted', {
     userId: userId,
     username: player.username
@@ -482,6 +533,7 @@ async function processScoring(lobbyId, winnerId, isExactMatch, io) {
   // Check for eliminations
   const newlyEliminated = gameLogic.checkEliminations(room.players);
   const eliminatedPlayers = [];
+  const eliminatedUpdates = []; // Batch database updates
 
   for (const userId of newlyEliminated) {
     const player = room.players.find(p => p.userId === userId);
@@ -493,55 +545,76 @@ async function processScoring(lobbyId, winnerId, isExactMatch, io) {
         username: player.username
       });
 
-      // Update database (only for authenticated users)
+      // Collect database updates for batching
       if (room.gameId && isUUID(userId)) {
-        await supabase
-          .from('game_players')
-          .update({
-            is_eliminated: true,
-            eliminated_at_round: room.roundNumber,
-            score: player.score
-          })
-          .eq('game_id', room.gameId)
-          .eq('user_id', userId);
+        eliminatedUpdates.push({
+          game_id: room.gameId,
+          user_id: userId,
+          is_eliminated: true,
+          eliminated_at_round: room.roundNumber,
+          score: player.score
+        });
       }
     }
   }
 
-  // Emit score update
+  // Emit score update immediately (don't wait for DB)
   io.to(lobbyId).emit('round_scored', {
     scoreUpdates: scoreUpdates,
     eliminatedPlayers: eliminatedPlayers,
     newRulesUnlocked: eliminatedPlayers.length > 0 ? gameLogic.getActiveRules(room.eliminationCount) : []
   });
 
-  // Update round in database
-  if (room.currentRoundId) {
-    const roundUpdate = {
-      status: 'completed',
-      completed_at: new Date().toISOString()
-    };
-    
-    // Only set winner_id if it's a UUID (authenticated user)
-    if (winnerId && isUUID(winnerId)) {
-      roundUpdate.winner_id = winnerId;
-    }
-    
-    await supabase
-      .from('game_rounds')
-      .update(roundUpdate)
-      .eq('id', room.currentRoundId);
-  }
-
-  // Update game record
+  // Batch database updates (fire-and-forget to reduce latency)
   if (room.gameId) {
-    await supabase
-      .from('games')
-      .update({
-        current_round: room.roundNumber,
-        rules_unlocked: room.activeRules
-      })
-      .eq('id', room.gameId);
+    (async () => {
+      try {
+        // Batch update eliminated players
+        if (eliminatedUpdates.length > 0) {
+          const updatePromises = eliminatedUpdates.map(update =>
+            supabase
+              .from('game_players')
+              .update({
+                is_eliminated: update.is_eliminated,
+                eliminated_at_round: update.eliminated_at_round,
+                score: update.score
+              })
+              .eq('game_id', update.game_id)
+              .eq('user_id', update.user_id)
+          );
+          await Promise.all(updatePromises);
+        }
+
+        // Update round in database
+        if (room.currentRoundId) {
+          const roundUpdate = {
+            status: 'completed',
+            completed_at: new Date().toISOString()
+          };
+          
+          // Only set winner_id if it's a UUID (authenticated user)
+          if (winnerId && isUUID(winnerId)) {
+            roundUpdate.winner_id = winnerId;
+          }
+          
+          await supabase
+            .from('game_rounds')
+            .update(roundUpdate)
+            .eq('id', room.currentRoundId);
+        }
+
+        // Update game record
+        await supabase
+          .from('games')
+          .update({
+            current_round: room.roundNumber,
+            rules_unlocked: room.activeRules
+          })
+          .eq('id', room.gameId);
+      } catch (dbError) {
+        console.error('Error updating database in processScoring:', dbError);
+      }
+    })();
   }
 
   // Check if game is over
@@ -568,40 +641,7 @@ async function endGame(lobbyId, io) {
   // Get final standings
   const standings = gameLogic.getFinalStandings(room.players);
 
-  // Update game status
-  if (room.gameId) {
-    await supabase
-      .from('games')
-      .update({ status: 'finished' })
-      .eq('id', room.gameId);
-
-    // Update lobby status
-    await supabase
-      .from('lobbies')
-      .update({ status: 'finished' })
-      .eq('id', lobbyId);
-
-    // Update player stats (only for authenticated users)
-    for (let i = 0; i < standings.length; i++) {
-      const player = standings[i];
-      
-      // Skip guest users
-      if (!isUUID(player.userId)) {
-        continue;
-      }
-      
-      const isWinner = i === 0 && !player.isEliminated;
-
-      await supabase.rpc('increment_user_stats', {
-        p_user_id: player.userId,
-        p_games_won: isWinner ? 1 : 0,
-        p_rounds_played: room.roundNumber,
-        p_rounds_survived: player.isEliminated ? (player.eliminatedAtRound || room.roundNumber) : room.roundNumber
-      });
-    }
-  }
-
-  // Emit game over
+  // Emit game over immediately (don't wait for DB)
   io.to(lobbyId).emit('game_over', {
     standings: standings.map((p, index) => ({
       rank: index + 1,
@@ -613,7 +653,54 @@ async function endGame(lobbyId, io) {
     }))
   });
 
-  // Clean up room after delay
+  // Update game status (fire-and-forget to reduce latency)
+  if (room.gameId) {
+    (async () => {
+      try {
+        await supabase
+          .from('games')
+          .update({ status: 'finished' })
+          .eq('id', room.gameId);
+
+        // Update lobby status
+        await supabase
+          .from('lobbies')
+          .update({ status: 'finished' })
+          .eq('id', lobbyId);
+
+        // Update player stats (only for authenticated users) - batch these
+        const statsPromises = [];
+        for (let i = 0; i < standings.length; i++) {
+          const player = standings[i];
+          
+          // Skip guest users
+          if (!isUUID(player.userId)) {
+            continue;
+          }
+          
+          const isWinner = i === 0 && !player.isEliminated;
+
+          statsPromises.push(
+            supabase.rpc('increment_user_stats', {
+              p_user_id: player.userId,
+              p_games_won: isWinner ? 1 : 0,
+              p_rounds_played: room.roundNumber,
+              p_rounds_survived: player.isEliminated ? (player.eliminatedAtRound || room.roundNumber) : room.roundNumber
+            })
+          );
+        }
+        
+        // Execute stats updates in parallel
+        if (statsPromises.length > 0) {
+          await Promise.all(statsPromises);
+        }
+      } catch (dbError) {
+        console.error('Error updating database in endGame:', dbError);
+      }
+    })();
+  }
+
+  // Clean up room after delay (reduced from 5 minutes to 2 minutes)
   setTimeout(() => {
     if (room.timerInterval) {
       clearInterval(room.timerInterval);
@@ -630,7 +717,7 @@ async function endGame(lobbyId, io) {
         console.error(`Error resetting lobby status for ${lobbyId}:`, err);
       });
     deleteRoom(lobbyId);
-  }, 300000); // 5 minutes
+  }, 120000); // 2 minutes (reduced from 5 minutes)
 }
 
 /**

@@ -8,8 +8,8 @@ import { supabase } from './supabaseClient.js';
 export class RoomCleanupService {
   constructor() {
     this.intervalId = null;
-    this.cleanupInterval = 5 * 60 * 1000; // 5 minutes
-    this.inactiveThreshold = 30; // 30 minutes
+    this.cleanupInterval = 3 * 60 * 1000; // 3 minutes (reduced from 5)
+    this.inactiveThreshold = 15; // 15 minutes (reduced from 30)
   }
 
   /**

@@ -32,7 +32,9 @@ const allowedOrigins = [
   'http://localhost:3000',
   'https://b8c0af9231d1.ngrok-free.app',
   'https://de93ff38ed5a.ngrok-free.app',
-  'https://5f695b504ed7.ngrok-free.app'
+  'https://5f695b504ed7.ngrok-free.app',
+  // Vercel domains (allow all vercel.app subdomains)
+  /\.vercel\.app$/
 ].filter(Boolean);
 
 const io = new Server(httpServer, {
@@ -41,10 +43,21 @@ const io = new Server(httpServer, {
       // Allow requests with no origin (like mobile apps or curl requests)
       if (!origin) return callback(null, true);
       
-      // Check if origin matches allowed origins or is an ngrok host
-      if (allowedOrigins.includes(origin) || 
+      // Check if origin matches allowed origins
+      const isAllowed = allowedOrigins.some(allowed => {
+        if (typeof allowed === 'string') {
+          return origin === allowed;
+        } else if (allowed instanceof RegExp) {
+          return allowed.test(origin);
+        }
+        return false;
+      });
+      
+      // Also check for ngrok and vercel domains
+      if (isAllowed || 
           origin.includes('.ngrok-free.app') || 
-          origin.includes('.ngrok.io')) {
+          origin.includes('.ngrok.io') ||
+          origin.includes('.vercel.app')) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));
@@ -53,18 +66,36 @@ const io = new Server(httpServer, {
     methods: ['GET', 'POST'],
     credentials: true
   },
-  pingTimeout: 60000,
-  pingInterval: 25000,
-  transports: ['websocket', 'polling']
+  // Optimized for lower memory usage
+  pingTimeout: 30000, // Reduced from 60000
+  pingInterval: 20000, // Reduced from 25000
+  transports: ['websocket', 'polling'], // Websocket preferred, polling fallback
+  allowEIO3: false,
+  maxHttpBufferSize: 1e6, // 1MB limit
+  connectTimeout: 20000,
+  upgradeTimeout: 10000
 });
 
 // CORS middleware
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin) || 
+    
+    // Check if origin matches allowed origins
+    const isAllowed = allowedOrigins.some(allowed => {
+      if (typeof allowed === 'string') {
+        return origin === allowed;
+      } else if (allowed instanceof RegExp) {
+        return allowed.test(origin);
+      }
+      return false;
+    });
+    
+    // Also check for ngrok and vercel domains
+    if (isAllowed || 
         origin.includes('.ngrok-free.app') || 
-        origin.includes('.ngrok.io')) {
+        origin.includes('.ngrok.io') ||
+        origin.includes('.vercel.app')) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -120,15 +151,41 @@ app.post('/api/lobbies', async (req, res) => {
   }
 });
 
-// Health check endpoint
+// Health check endpoint with memory info
 app.get('/health', (req, res) => {
+  const memoryUsage = process.memoryUsage();
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     connectedSockets: io.sockets.sockets.size,
-    activeRooms: roomManager.getActiveRooms()
+    activeRooms: roomManager.getActiveRooms(),
+    memory: {
+      heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024), // MB
+      heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024), // MB
+      rss: Math.round(memoryUsage.rss / 1024 / 1024) // MB
+    }
   });
 });
+
+// Periodic cleanup of stale socket tracking (every 5 minutes)
+setInterval(() => {
+  // Clean up any orphaned socket references
+  let cleaned = 0;
+  for (const [socketId, userInfo] of socketToUser.entries()) {
+    const socket = io.sockets.sockets.get(socketId);
+    if (!socket || !socket.connected) {
+      socketToUser.delete(socketId);
+      if (userInfo.userId) {
+        userToSocket.delete(userInfo.userId);
+      }
+      cleaned++;
+    }
+  }
+  
+  if (cleaned > 0) {
+    console.log(`🧹 Cleaned up ${cleaned} stale socket references`);
+  }
+}, 5 * 60 * 1000);
 
 // Socket connection tracking
 const socketToUser = new Map(); // socket.id -> { userId, lobbyId }
@@ -144,6 +201,7 @@ io.on('connection', (socket) => {
     
     const userInfo = socketToUser.get(socket.id);
     if (userInfo) {
+      // Clean up socket tracking immediately
       userToSocket.delete(userInfo.userId);
       socketToUser.delete(socket.id);
       
@@ -167,7 +225,7 @@ io.on('connection', (socket) => {
             });
           }
           
-          // Broadcast updated room state
+          // Broadcast updated room state only if room still exists
           const roomState = roomManager.getRoomState(userInfo.lobbyId);
           if (roomState) {
             io.to(userInfo.lobbyId).emit('room_state', roomState);
@@ -175,6 +233,9 @@ io.on('connection', (socket) => {
         }
       }
     }
+    
+    // Force cleanup of socket resources
+    socket.removeAllListeners();
   });
 
   // Join lobby
@@ -398,8 +459,10 @@ io.on('connection', (socket) => {
           isGuest: profile.isGuest || false
         });
 
-        // Update database for authenticated users only (guests skip this)
-        if (!profile.isGuest && token) {
+      // Update database for authenticated users only (guests skip this)
+      // Use fire-and-forget to reduce latency
+      if (!profile.isGuest && token) {
+        (async () => {
           try {
             // Check if player already in database
             const { data: existing } = await supabase
@@ -437,13 +500,14 @@ io.on('connection', (socket) => {
             // Ignore database errors for guests
             console.log(`ℹ️ Could not update database (likely guest user):`, dbError.message);
           }
-        } else {
-          // For guests, ensure isReady is false initially
-          const player = gameRoom.players.find(p => p.userId === userId);
-          if (player && player.isReady === undefined) {
-            player.isReady = false;
-          }
+        })();
+      } else {
+        // For guests, ensure isReady is false initially
+        const player = gameRoom.players.find(p => p.userId === userId);
+        if (player && player.isReady === undefined) {
+          player.isReady = false;
         }
+      }
 
         // Notify others
         io.to(lobbyId).emit('player_joined', {
@@ -724,15 +788,16 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Save to database for authenticated users
+      // Save to database for authenticated users (fire-and-forget)
       if (!isGuest) {
-        await supabase
+        supabase
           .from('lobby_messages')
           .insert({
             lobby_id: lobbyId,
             user_id: userId,
             message: message
-          });
+          })
+          .catch(err => console.error('Error saving message to DB:', err));
       }
 
       // Broadcast message
