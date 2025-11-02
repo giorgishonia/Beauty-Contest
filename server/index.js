@@ -32,9 +32,7 @@ const allowedOrigins = [
   'http://localhost:3000',
   'https://b8c0af9231d1.ngrok-free.app',
   'https://de93ff38ed5a.ngrok-free.app',
-  'https://5f695b504ed7.ngrok-free.app',
-  // Vercel domains (allow all vercel.app subdomains)
-  /\.vercel\.app$/
+  'https://5f695b504ed7.ngrok-free.app'
 ].filter(Boolean);
 
 const io = new Server(httpServer, {
@@ -43,21 +41,10 @@ const io = new Server(httpServer, {
       // Allow requests with no origin (like mobile apps or curl requests)
       if (!origin) return callback(null, true);
       
-      // Check if origin matches allowed origins
-      const isAllowed = allowedOrigins.some(allowed => {
-        if (typeof allowed === 'string') {
-          return origin === allowed;
-        } else if (allowed instanceof RegExp) {
-          return allowed.test(origin);
-        }
-        return false;
-      });
-      
-      // Also check for ngrok and vercel domains
-      if (isAllowed || 
+      // Check if origin matches allowed origins or is an ngrok host
+      if (allowedOrigins.includes(origin) || 
           origin.includes('.ngrok-free.app') || 
-          origin.includes('.ngrok.io') ||
-          origin.includes('.vercel.app')) {
+          origin.includes('.ngrok.io')) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));
@@ -80,22 +67,9 @@ const io = new Server(httpServer, {
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
-    
-    // Check if origin matches allowed origins
-    const isAllowed = allowedOrigins.some(allowed => {
-      if (typeof allowed === 'string') {
-        return origin === allowed;
-      } else if (allowed instanceof RegExp) {
-        return allowed.test(origin);
-      }
-      return false;
-    });
-    
-    // Also check for ngrok and vercel domains
-    if (isAllowed || 
+    if (allowedOrigins.includes(origin) || 
         origin.includes('.ngrok-free.app') || 
-        origin.includes('.ngrok.io') ||
-        origin.includes('.vercel.app')) {
+        origin.includes('.ngrok.io')) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));

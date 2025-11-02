@@ -22,22 +22,10 @@ const getSocketUrl = () => {
     return import.meta.env.VITE_SOCKET_URL;
   }
   
-  // Check if we're running on Vercel (production)
+  // Check if we're running on ngrok
   const hostname = window.location.hostname;
   const protocol = window.location.protocol;
-  const isVercel = hostname.includes('.vercel.app') || 
-                   hostname.includes('vercel.app') ||
-                   import.meta.env.VERCEL ||
-                   import.meta.env.MODE === 'production';
   
-  if (isVercel) {
-    console.log('🌐 Detected Vercel deployment, using production server via proxy');
-    // Use relative path to proxy through Vercel
-    // The vercel.json rewrite will forward /socket.io/* to the backend
-    return `${protocol}//${hostname}`;
-  }
-  
-  // Check if we're running on ngrok
   if (hostname.includes('.ngrok-free.app') || hostname.includes('.ngrok.io')) {
     // If frontend is on ngrok, assume socket server is also on ngrok
     // This assumes you're running socket server on same ngrok tunnel or have separate tunnel
@@ -73,19 +61,13 @@ export function SocketProvider({ children }: SocketProviderProps) {
     }
 
     // Create socket connection
-    // When using Vercel proxy, use polling only (WebSocket upgrade won't work through Vercel rewrites)
-    const isVercelProxy = SOCKET_URL.includes('.vercel.app') || SOCKET_URL.includes('vercel.app');
     const newSocket = io(SOCKET_URL, {
-      transports: isVercelProxy ? ['polling'] : ['polling', 'websocket'], // Polling only for Vercel proxy
+      transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       reconnectionAttempts: 10,
-      timeout: 20000,
-      path: '/socket.io/',
-      // Don't try to upgrade to websocket when using Vercel proxy
-      upgrade: !isVercelProxy,
-      rememberUpgrade: false
+      timeout: 20000
     });
 
     // Connection event handlers

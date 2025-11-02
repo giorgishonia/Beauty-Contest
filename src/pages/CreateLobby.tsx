@@ -46,24 +46,9 @@ const CreateLobby = () => {
     setLoading(true);
 
     try {
-      // Get server URL - use same logic as SocketContext
-      const hostname = window.location.hostname;
-      const protocol = window.location.protocol;
-      const isVercel = hostname.includes('.vercel.app') || 
-                       hostname.includes('vercel.app') ||
-                       import.meta.env.VERCEL ||
-                       import.meta.env.MODE === 'production';
-      
-      // Use environment variable if set, otherwise detect based on deployment
-      let serverUrl: string;
-      if (import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_SERVER_URL) {
-        serverUrl = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
-      } else if (isVercel) {
-        // Use relative URL when on Vercel (will be proxied)
-        serverUrl = `${protocol}//${hostname}`;
-      } else {
-        serverUrl = 'http://localhost:3001';
-      }
+      // Get server URL - use socket URL since API and socket are on same server
+      // If VITE_SOCKET_URL is set, use it; otherwise default to localhost:3001
+      const serverUrl = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
       
       console.log('🌐 Creating lobby via server:', serverUrl);
 
