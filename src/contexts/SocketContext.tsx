@@ -24,14 +24,17 @@ const getSocketUrl = () => {
   
   // Check if we're running on Vercel (production)
   const hostname = window.location.hostname;
+  const protocol = window.location.protocol;
   const isVercel = hostname.includes('.vercel.app') || 
                    hostname.includes('vercel.app') ||
                    import.meta.env.VERCEL ||
                    import.meta.env.MODE === 'production';
   
   if (isVercel) {
-    console.log('🌐 Detected Vercel deployment, using production server');
-    return 'http://176.223.142.21:3001';
+    console.log('🌐 Detected Vercel deployment, using production server via proxy');
+    // Use relative path to proxy through Vercel
+    // The vercel.json rewrite will forward /socket.io/* to the backend
+    return `${protocol}//${hostname}`;
   }
   
   // Check if we're running on ngrok
@@ -69,26 +72,20 @@ export function SocketProvider({ children }: SocketProviderProps) {
       return;
     }
 
-    // Check if we need to use polling only (HTTPS page -> HTTP server)
-    const isPageHttps = window.location.protocol === 'https:';
-    const isServerHttps = SOCKET_URL.startsWith('https://') || SOCKET_URL.startsWith('wss://');
-    const usePollingOnly = isPageHttps && !isServerHttps;
-
-    if (usePollingOnly) {
-      console.log('⚠️ HTTPS page detected with HTTP server, using polling transport only');
-    }
-
     // Create socket connection
-    // Use polling only if HTTPS page with HTTP server (mixed content prevention)
+    // When using Vercel proxy, use polling only (WebSocket upgrade won't work through Vercel rewrites)
+    const isVercelProxy = SOCKET_URL.includes('.vercel.app') || SOCKET_URL.includes('vercel.app');
     const newSocket = io(SOCKET_URL, {
-      transports: usePollingOnly ? ['polling'] : ['websocket', 'polling'],
+      transports: isVercelProxy ? ['polling'] : ['polling', 'websocket'], // Polling only for Vercel proxy
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       reconnectionAttempts: 10,
       timeout: 20000,
-      // Force polling if mixed content detected
-      upgrade: !usePollingOnly // Don't try to upgrade to websocket if polling only
+      path: '/socket.io/',
+      // Don't try to upgrade to websocket when using Vercel proxy
+      upgrade: !isVercelProxy,
+      rememberUpgrade: false
     });
 
     // Connection event handlers

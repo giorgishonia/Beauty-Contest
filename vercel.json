@@ -1,0 +1,17 @@
+{
+  "rewrites": [
+    {
+      "source": "/socket.io/:path*",
+      "destination": "http://176.223.142.21:3001/socket.io/:path*"
+    },
+    {
+      "source": "/api/lobbies",
+      "destination": "http://176.223.142.21:3001/api/lobbies"
+    },
+    {
+      "source": "/health",
+      "destination": "http://176.223.142.21:3001/health"
+    }
+  ]
+}
+
