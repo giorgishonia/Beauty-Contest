@@ -69,14 +69,26 @@ export function SocketProvider({ children }: SocketProviderProps) {
       return;
     }
 
+    // Check if we need to use polling only (HTTPS page -> HTTP server)
+    const isPageHttps = window.location.protocol === 'https:';
+    const isServerHttps = SOCKET_URL.startsWith('https://') || SOCKET_URL.startsWith('wss://');
+    const usePollingOnly = isPageHttps && !isServerHttps;
+
+    if (usePollingOnly) {
+      console.log('⚠️ HTTPS page detected with HTTP server, using polling transport only');
+    }
+
     // Create socket connection
+    // Use polling only if HTTPS page with HTTP server (mixed content prevention)
     const newSocket = io(SOCKET_URL, {
-      transports: ['websocket', 'polling'],
+      transports: usePollingOnly ? ['polling'] : ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       reconnectionAttempts: 10,
-      timeout: 20000
+      timeout: 20000,
+      // Force polling if mixed content detected
+      upgrade: !usePollingOnly // Don't try to upgrade to websocket if polling only
     });
 
     // Connection event handlers
